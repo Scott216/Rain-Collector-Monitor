@@ -1,5 +1,7 @@
 /*
 Rain collector heater 
+Board: panStamp AVR  http://www.panstamp.com/product/panstamp-avr/
+IDE Settings: Pro-Mini 3v 8Mhz or panStamp
 
 Function:
 Measure 4 temperatures: 2 heating pads, inside rain collector, outside rain collector
@@ -37,15 +39,16 @@ If heaters get too hot, then cycle them until you can figure out the best voltag
 use a low pass filter on thermistors
 
 Change Log:
-v0.10 09/12/14 - Added version number
-v0.11 10/04/14 - Use interrupt for pulse in. Moved global variables to loop() and made static.  Renamed Thermistor() to thermistorTempF().  
+09/12/14 v0.10 - Added version number
+10/04/14 v0.11 - Use interrupt for pulse in. Moved global variables to loop() and made static.  Renamed Thermistor() to thermistorTempF().  
                  Only send data every 1/2 second. 
-v0.12 10/17/14 - Changed networks address (syncword)to two byte array
-v0.13 10/18/14 - Compiled with new version of panStamp libraries v2
+10/17/14 v0.12 - Changed networks address (syncword)to two byte array
+10/18/14 v0.13 - Compiled with new version of panStamp libraries v2
+12/25/14 v0.14 - Added setTxPowerAmp()
 
 */
 
-#define VERSION "v0.13"
+#define VERSION "v0.14"
 #define PRINT_DEBUG     // comment this out to turn of serial printint
 #include <HardwareSerial.h> // Needed by Arduino IDE 1.5.x
 #include <avr/wdt.h>  // http://github.com/simonz05/arduino-headers/blob/master/wdt.h
@@ -104,6 +107,7 @@ void setup()
   radio.init();
   radio.setSyncWord(g_networkAddress, false);   // true saves address to EEPROM
   radio.setDevAddress(g_senderAddress, false);   // true saves address to EEPROM
+  radio.setTxPowerAmp(PA_LongDistance);
 
   #ifdef PRINT_DEGBUG
     printpanStampConfig();
