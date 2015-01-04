@@ -1,7 +1,7 @@
 /*
 Rain collector heater 
 Board: panStamp AVR  http://www.panstamp.com/product/panstamp-avr/
-IDE Settings: Pro-Mini 3v 8Mhz or panStamp
+IDE Settings 1.0.5: Pro-Mini 3v 8Mhz or panStamp
 
 Function:
 Measure 4 temperatures: 2 heating pads, inside rain collector, outside rain collector

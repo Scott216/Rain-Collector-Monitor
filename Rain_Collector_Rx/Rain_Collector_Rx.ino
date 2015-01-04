@@ -1,7 +1,11 @@
 /*
-Hardware:
- Wiznet Ethernet module
- PanStamp V2
+Main Hardware:
+  WIZ811MJ Ethernet module https://www.sparkfun.com/products/9473
+  Board: panStamp AVR  http://www.panstamp.com/product/panstamp-avr/
+
+
+IDE Settings v1.5.8: panStamp AVR.  Must use modified Ethernet library that support SS pin selection
+
 
 Data is uploaded to Xively: 
  
