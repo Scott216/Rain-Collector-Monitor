@@ -30,9 +30,10 @@ Ethernet.cpp - https://www.diffchecker.com/6jdpzevk
 
 
 To Do:
-
+Create brand new xivel feed and change channel IDs from numbers to text
 
 Xively Streams ( http://xively.com/feeds/103470 )
+If you add a stream, you need to increase XIVELY_STREAMS
  0  Inches of rain.  Take pulses and divide by 10
  1  Heater On/Off
  2  Heating Pad 1 temp
@@ -44,18 +45,22 @@ Xively Streams ( http://xively.com/feeds/103470 )
  8  Xively upload successes
  9  Xively upload failures 
 10  panStamp TxRx successes
+11  Rx Status
 
 
-History
-v2.00  09/13/14 - combined panStamp Rx and Base code together so panStamp can control Ethernet shield
-v2.01  10/04/14 - renamed a few things, some minor cleanup
-v2.02  10/17/14 - Changed networks address (syncword)to two byte array
-v2.03  12/02/14 - compiled with IDE 1.5.8 and SurferTim modified libraries - doesn't work, hangs on Serial.println(Ethernet.localIP());
-v2.04  12/09/14 - added debugging code to find lockup problem.  Commented out Ethernet code and found it's hanging on radio.init().  Using stock Ethernet libraries
-v2.05  12/10/14 - Updated for IDE 1.5.8 and panStamp API v2.0.  Finally got it working
+Change Log
+09/13/14 v2.00 - Combined panStamp Rx and Base code together so panStamp can control Ethernet shield
+10/04/14 v2.01 - Renamed a few things, some minor cleanup
+10/17/14 v2.02 - Changed networks address (syncword)to two byte array
+12/02/14 v2.03 - Compiled with IDE 1.5.8 and SurferTim modified libraries - doesn't work, hangs on Serial.println(Ethernet.localIP());
+12/09/14 v2.04 - Added debugging code to find lockup problem.  Commented out Ethernet code and found it's hanging on radio.init().  Using stock Ethernet libraries
+12/10/14 v2.05 - Updated for IDE 1.5.8 and panStamp API v2.0.  Finally got it working
+01/09/15 v2.06 - Tx and Rx LED pins were reversed
+02/02/14 v2.06 - Added new channel for Rx status. 0 if not receiving data from outside, 1 if ok
+
 */
 
-#define VERSION "v2.05"
+#define VERSION "v2.06"
 #define PRINT_DEBUG
 
 #include <SPI.h>             //  Put this after cc1101.h Communicate with SPI devices http://arduino.cc/en/Reference/SPI
@@ -76,7 +81,7 @@ uint32_t g_uploadTimout_timer = UPDATE_TIMEOUT; // Timer to reboot if no success
 
 ERxPachubeDataOut dataout_Rain(XIVELY_API_KEY, FEED_ID_RAIN);
 
-const byte XIVELY_STREAMS = 11;
+const byte XIVELY_STREAMS = 12;
 
 byte g_ip[] =  { 192, 168, 46, 83 };   // Suntec
 // byte g_ip[] =  { 192, 168, 216, 40 };  // Crestview
@@ -84,13 +89,13 @@ byte g_mac[] = { 0xCC, 0xAC, 0xBE, 0x46, 0xFE, 0x99 };
 
 // I/O
 const byte ETH_SS_PIN =      9;  // Ethernet slave Select pin
-const byte TX_OK_LED_PIN =   4;  // LED to flash when Xively upload succeeds
-const byte RX_OK_LED_PIN =   5;  // LED to flash when panStamp packet is received
+const byte TX_OK_LED_PIN =   5;  // LED to flash when Xively upload succeeds
+const byte RX_OK_LED_PIN =   4;  // LED to flash when panStamp packet is received
 
 const byte g_RF_Channel =         0;   // panStamp channel
 byte g_psNetworkAddress[] = {10, 0};   // panStamp network address, aka SyncWord
 const byte g_psReceiverAddress = 40;   // panStamp inside Rx address
-
+enum rx_status_t {RX_BAD, RX_GOOD}; // Status of packets received.
 
 // flag indicates a wireless panStamp packet has been received
 volatile boolean g_psPacketAvail = false;        
@@ -234,15 +239,29 @@ void BlinkLed(byte ledPin)
 // Upload rain collector data to Xively
 int uploadRainCollector(bool gotRainData)
 {
+  static rx_status_t Rx_Status;                // Status of whether or not data is being received from outside Tx
+  static uint32_t Rx_Status_timer = millis();  // Timer resets every time new panStamp packet is received
+  
   // If transmitter is sending data, increment g_panStampSuccesses
   if( gotRainData )
-  { g_panStampSuccesses++; }
+  { 
+    g_panStampSuccesses++; 
+    Rx_Status_timer = millis() + 1800000UL;  // Got data from Tx, so add 30 minutes to panStamp packet Rx timer
+  }
   else
   {
     #ifdef PRINT_DEBUG
       Serial.println(F("Not receiving data from ouside"));
     #endif
   }
+  
+  // Set Rx status indicating if panStamp is receiving packets from outside
+  // If no packets after 30 minutes, change status to RX_BAD (zero)
+  if ((long)(millis()- Rx_Status_timer) > 0)
+  { Rx_Status = RX_BAD; }
+  else
+  { Rx_Status = RX_GOOD; }
+  
 
   dataout_Rain.updateData(0, (float) (g_rainPulseCount / 100.0));   // Rain - convert to inches
   dataout_Rain.updateData(1, g_isHeaterOn);                         // Heater on/off status
@@ -254,7 +273,9 @@ int uploadRainCollector(bool gotRainData)
 //dataout_Rain.updateData(7, rainData[]);                           // Spare
   dataout_Rain.updateData(8, g_xively_successes);                   // Xively upload successes
   dataout_Rain.updateData(9, g_xively_failures);                    // Xively upload failures
-  dataout_Rain.updateData(10, g_panStampSuccesses);                 // panStamp TxRx successes
+  dataout_Rain.updateData(10, g_panStampSuccesses);                 // panStamp Rx successes
+  dataout_Rain.updateData(11, Rx_Status);                           // panStamp Rx status: 0 = not getting data, 1 = OK
+  
 
   int xively_upload_status = dataout_Rain.updatePachube();  // send data to Xively
   

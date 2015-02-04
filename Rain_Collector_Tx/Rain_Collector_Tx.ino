@@ -3,6 +3,8 @@ Rain collector heater
 Board: panStamp AVR  http://www.panstamp.com/product/panstamp-avr/
 IDE Settings 1.0.5: Pro-Mini 3v 8Mhz or panStamp
 
+Xively Feed: https://xively.com/feeds/103470/
+
 Function:
 Measure 4 temperatures: 2 heating pads, inside rain collector, outside rain collector
 Turn heater on/off
@@ -44,7 +46,7 @@ Change Log:
                  Only send data every 1/2 second. 
 10/17/14 v0.12 - Changed networks address (syncword)to two byte array
 10/18/14 v0.13 - Compiled with new version of panStamp libraries v2
-12/25/14 v0.14 - Added setTxPowerAmp()
+12/25/14 v0.14 - Added setTxPowerAmp(). Installed in rail collector on 1/12/15
 
 */
 
@@ -107,7 +109,8 @@ void setup()
   radio.init();
   radio.setSyncWord(g_networkAddress, false);   // true saves address to EEPROM
   radio.setDevAddress(g_senderAddress, false);   // true saves address to EEPROM
-  radio.setTxPowerAmp(PA_LongDistance);
+  radio.setTxPowerAmp(PA_LongDistance);  // Turns on high power mode.  PA_LowPower is the default 
+
 
   #ifdef PRINT_DEGBUG
     printpanStampConfig();
