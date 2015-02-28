@@ -46,8 +46,9 @@ Change Log:
                  Only send data every 1/2 second. 
 10/17/14 v0.12 - Changed networks address (syncword)to two byte array
 10/18/14 v0.13 - Compiled with new version of panStamp libraries v2
-12/25/14 v0.14 - Added setTxPowerAmp(). Installed in rail collector on 1/12/15
-
+12/25/14 v0.14 - Added setTxPowerAmp(). Uploaded to rain collector on 1/12/15
+02/10/15 v0.15 - When outside temp is < 20, heater now stays on for 40 minutes, if > 20F, it's on for 15 minuts.
+                 Also, renamed some variables and constants.
 */
 
 #define VERSION "v0.14"
@@ -60,17 +61,17 @@ Change Log:
                       // http://code.google.com/p/panstamp/wiki/PANSTAMPclass
 
 // Analog pins
-const int8_t   TEMP_HOT1 =  0;  // Temp on heating pad 1
-const int8_t   TEMP_HOT2 =  1;  // Temp on heating pad 2
-const int8_t   TEMP_IN =    2;  // Temp on PCB
-const int8_t   TEMP_OUT =   3;  // Temp outside under rain collector
+const int8_t   PIN_TEMP_HOT1 =     0;  // Temp on heating pad 1
+const int8_t   PIN_TEMP_HOT2 =     1;  // Temp on heating pad 2
+const int8_t   PIN_TEMP_PCB =      2;  // Temp on PCB
+const int8_t   TEMP_OUT =          3;  // Temp outside under rain collector
 // Digital pin
-const int8_t   PULSE_IN =          3;  // Rain pulse in
-const int8_t   PULSE_OUT =         4;  // Rain pulse out to ISS on roof
-const int8_t   HEAT_OUT =          5;  // Relay to turn heaters on
-const uint32_t ONEMIN =      60000UL;  
-const uint8_t  HIGH_TEMP_LIMIT = 175;  // high temperature limit (F)
-const uint32_t HEATER_ON_TIME =  30UL * ONEMIN; // Time heater stays on after last pulse detected (if it's cold outside)
+const int8_t   PIN_PULSE_IN =      3;  // Rain pulse in
+const int8_t   PIN_PULSE_OUT =     4;  // Rain pulse out to ISS on roof
+const int8_t   PIN_HEATER_OUTPUT = 5;  // Relay to turn heaters on
+
+
+const uint32_t ONEMIN =      60000UL;  // 1 minute in mS
 
 volatile bool g_gotRainPulse = false;  // set by rainPulse() interrupt when rain bucket tips
 
@@ -97,11 +98,11 @@ void setup()
     Serial.println(VERSION);
   #endif
   
-  pinMode(PULSE_IN,  INPUT );
-  pinMode(PULSE_OUT, OUTPUT);
-  pinMode(HEAT_OUT,  OUTPUT);
-  digitalWrite(PULSE_OUT, LOW);
-  digitalWrite(HEAT_OUT, LOW);
+  pinMode(PIN_PULSE_IN,         INPUT);
+  pinMode(PIN_PULSE_OUT,       OUTPUT);
+  pinMode(PIN_HEATER_OUTPUT,   OUTPUT);
+  digitalWrite(PIN_PULSE_OUT,     LOW);
+  digitalWrite(PIN_HEATER_OUTPUT, LOW);
   
   attachInterrupt(1, rainPulse, FALLING);  // Pin D3 interrupt
   
@@ -124,40 +125,43 @@ void loop()
 
   wdt_reset();  
   
-  static int16_t tempIn;
-  static int16_t tempOut;
-  static int16_t tempHot1;
-  static int16_t tempHot2; 
+  const uint32_t HEATER_ON_TIME =  30UL * ONEMIN; // Time heater stays on after last pulse detected (if it's cold outside)
+  const uint8_t  HIGH_TEMP_LIMIT = 175;  // high temperature limit (F) for heaters
+
+  static int16_t temp_PCB;
+  static int16_t temp_Outside;
+  static int16_t temp_Heater1;
+  static int16_t temp_Heater2; 
   double filterVal = 0.01;
   static uint32_t heatOnDelay;         // Delay so heater doesn't come back on too soon
   static bool heatOnDelayTmrOneshot;   // Flag used with heater on delay timer
   static bool hourlyCheckFlag;         // True if heater should come on for an hourly check to see if there is snow to melt.  
-                                       // Heater shouls stay on for HEATER_ON_TIME 
- 
+                                       // Heater should stay on for HEATER_ON_TIME 
+
   // Read temps, convert to F and smooth with low pass filter
-  tempIn =    (thermistorTempF(analogRead(TEMP_IN))   * (1-filterVal)) + (filterVal * tempIn );
-  tempOut =   (thermistorTempF(analogRead(TEMP_OUT))  * (1-filterVal)) + (filterVal * tempOut );
-  tempHot1 =  (thermistorTempF(analogRead(TEMP_HOT1)) * (1-filterVal)) + (filterVal * tempHot1 );
-  tempHot2 =  (thermistorTempF(analogRead(TEMP_HOT2)) * (1-filterVal)) + (filterVal * tempHot2 );
+  temp_PCB =      (thermistorTempF(analogRead(PIN_TEMP_PCB))  * (1-filterVal)) + (filterVal *     temp_PCB );
+  temp_Outside =  (thermistorTempF(analogRead(TEMP_OUT))      * (1-filterVal)) + (filterVal * temp_Outside );
+  temp_Heater1 =  (thermistorTempF(analogRead(PIN_TEMP_HOT1)) * (1-filterVal)) + (filterVal * temp_Heater1 );
+  temp_Heater2 =  (thermistorTempF(analogRead(PIN_TEMP_HOT2)) * (1-filterVal)) + (filterVal * temp_Heater2 );
  
   // Turn on heater
   static uint32_t lastHeatOnTime = 0;   // Used to turn the heater on everyhour to see if any pulses start from melted snow
   static uint32_t lastPulseTime =  0;   // Used to see how long since the last pulse.  If heater is on an there are no pulses, then turn it off
-  bool is_cold_outside = tempOut < 40;
-  bool inside_temp_not_too_hot = tempIn   <  80;
-  bool heat_pads_not_too_hot = (tempHot1 < HIGH_TEMP_LIMIT) && (tempHot2 < HIGH_TEMP_LIMIT);
+  bool is_cold_outside = temp_Outside < 40;
+  bool inside_temp_not_too_hot = temp_PCB   <  80;
+  bool heat_pads_not_too_hot = (temp_Heater1 < HIGH_TEMP_LIMIT) && (temp_Heater2 < HIGH_TEMP_LIMIT);
   bool heat_timer_not_expired =  (((long)(millis() - lastPulseTime) < HEATER_ON_TIME) || hourlyCheckFlag == true);  
   bool heat_delay_has_passed = (long)(millis() - heatOnDelay) > 0;
-  if ( is_cold_outside && heat_pads_not_too_hot && heat_timer_not_expired && heat_delay_has_passed )
+  if ( is_cold_outside && heat_pads_not_too_hot && inside_temp_not_too_hot && heat_timer_not_expired && heat_delay_has_passed )
   {
     // Turn heaters on
-    digitalWrite(HEAT_OUT, HIGH);
+    digitalWrite(PIN_HEATER_OUTPUT, HIGH);
     lastHeatOnTime = millis();
     heatOnDelayTmrOneshot = false;
   }
   else // turn heater off
   {
-    digitalWrite(HEAT_OUT, LOW); 
+    digitalWrite(PIN_HEATER_OUTPUT, LOW); 
     // Only want heatOnDelay timer to be set once
     if (heatOnDelayTmrOneshot == false)
     { 
@@ -174,8 +178,15 @@ void loop()
     hourlyCheckTimer = millis();
   }
 
-  // After 15 minutes, reset hourly check flag
-  if((long)(millis() - hourlyCheckTimer ) >= (ONEMIN * 15L) && hourlyCheckFlag == true )
+  // Reset hourly check flag.  This is where heater turns on once an hour to see if any snow melts.
+  // If outside temp > 20F then reset after 15 minutes. If temp is < 20F, reset flag after 40 minutes
+  uint32_t heater_on_time;
+  if ( temp_Outside > 20 )
+  { heater_on_time = ONEMIN * 15L; }
+  else
+  { heater_on_time = ONEMIN * 40L; }
+  
+  if( ((long)(millis() - hourlyCheckTimer ) >= heater_on_time ) && (hourlyCheckFlag == true) )
   { hourlyCheckFlag = false; }   
 
   // Reset rain pulse counter after 10 hours of no pulses
@@ -189,9 +200,9 @@ void loop()
     lastPulseTime = millis();
 
     // Turn on pulse out relay for 1/2 second
-    digitalWrite(PULSE_OUT, HIGH);
+    digitalWrite(PIN_PULSE_OUT, HIGH);
     delay(500);
-    digitalWrite(PULSE_OUT, LOW);
+    digitalWrite(PIN_PULSE_OUT, LOW);
     
     g_gotRainPulse = false;  // reset 
   }
@@ -206,19 +217,19 @@ void loop()
     xively.data[k++] = g_receiverAddress;  // Address of panStamp Receiver we are sending too. THIS IS REQUIRED BY THE CC1101 LIBRARY
     xively.data[k++] = g_senderAddress;    // Address of this panStamp Tx
     
-    xively.data[k++] = digitalRead(HEAT_OUT);  // Heater on state - boolean
+    xively.data[k++] = digitalRead(PIN_HEATER_OUTPUT);  // Heater on state - boolean
     xively.data[k++] = pulseCount >> 8 & 0xff;        
     xively.data[k++] = pulseCount & 0xff;             
   
     // Put temperatures in data array
-    xively.data[k++] = tempOut >> 8 & 0xff;        
-    xively.data[k++] = tempOut & 0xff;             
-    xively.data[k++] = tempIn >> 8 & 0xff;         
-    xively.data[k++] = tempIn & 0xff;              
-    xively.data[k++] = tempHot1 >> 8 & 0xff;        
-    xively.data[k++] = tempHot1 & 0xff;             
-    xively.data[k++] = tempHot2 >> 8 & 0xff;        
-    xively.data[k++] = tempHot2 & 0xff;             
+    xively.data[k++] = temp_Outside >> 8 & 0xff;        
+    xively.data[k++] = temp_Outside & 0xff;             
+    xively.data[k++] = temp_PCB >> 8 & 0xff;         
+    xively.data[k++] = temp_PCB & 0xff;              
+    xively.data[k++] = temp_Heater1 >> 8 & 0xff;        
+    xively.data[k++] = temp_Heater1 & 0xff;             
+    xively.data[k++] = temp_Heater2 >> 8 & 0xff;        
+    xively.data[k++] = temp_Heater2 & 0xff;             
    
     bool sentStatus = radio.sendData(xively);
     sendDataTimer = millis() + 500;  // timer set to send data again in 1/2 second
