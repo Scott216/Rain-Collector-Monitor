@@ -1,26 +1,18 @@
 /*
-Main Hardware:
-  WIZ811MJ Ethernet module https://www.sparkfun.com/products/9473
-  Board: panStamp AVR  http://www.panstamp.com/product/panstamp-avr/
+To Compile (IDE 1.6.x).  Board = panStamp AVR
+
+To Do:
+Create new xivel feed and change channel IDs from numbers to text
+Change from ERxPachube.h to Xively.h - maybe  http://github.com/xively/xively_arduino
 
 
-IDE Settings v1.5.8: panStamp AVR.  Must use modified Ethernet library that support SS pin selection
+Overview:
+panStamp receives data from outside rain collector.  The data it receives is rain pulses (0.01" rain per pulse), heater on/off status and several temperatures. 
+This data is then uploaded to Xively
 
-
-Data is uploaded to Xively: 
- 
-Forum thread regarding compile problems: http://www.panstamp.org/forum/showthread.php?tid=3073&pid=9564#pid9564
-
-Code in Gist (v2.04) https://gist.github.com/Scott216/673f24079b22f3b147e1
-
-
-Compiled with Arduino IDE v1.5.8
 Since both panstamp and Ethernet libary use pin D10 for slave select, some of the Ethernet libraries need to be modified to use a different pin.
 SurferTim modified library files so Ethernet.select() would work:
 Got new library from SurferTim here:  http://forum.arduino.cc/index.php?topic=217423.msg1962182#msg1962182
-Files changed are:
-C:\Program Files (x86)\arduino_158\libraries\Ethernet\src\Ethernet.h & .cpp
-C:\Program Files (x86)\arduino_158\libraries\Ethernet\src\utility\w5100.h & .cpp
 
 Difference between stock Arduino v1.5.8 original and SurferTim's are:
 w5100.h      - https://www.diffchecker.com/2zzxtslg
@@ -28,9 +20,10 @@ w5100.cpp    - https://www.diffchecker.com/hl0s1zmd
 Ethernet.h   - https://www.diffchecker.com/hwg0wq0p
 Ethernet.cpp - https://www.diffchecker.com/6jdpzevk
 
+Main Hardware:
+ WIZ811MJ Ethernet module https://www.sparkfun.com/products/9473
+ panStamp AVR  http://www.panstamp.com/product/panstamp-avr/
 
-To Do:
-Create brand new xivel feed and change channel IDs from numbers to text
 
 Xively Streams ( http://xively.com/feeds/103470 )
 If you add a stream, you need to increase XIVELY_STREAMS
@@ -48,7 +41,7 @@ If you add a stream, you need to increase XIVELY_STREAMS
 11  Rx Status
 
 
-Change Log
+Change Log:
 09/13/14 v2.00 - Combined panStamp Rx and Base code together so panStamp can control Ethernet shield
 10/04/14 v2.01 - Renamed a few things, some minor cleanup
 10/17/14 v2.02 - Changed networks address (syncword)to two byte array
@@ -56,15 +49,18 @@ Change Log
 12/09/14 v2.04 - Added debugging code to find lockup problem.  Commented out Ethernet code and found it's hanging on radio.init().  Using stock Ethernet libraries
 12/10/14 v2.05 - Updated for IDE 1.5.8 and panStamp API v2.0.  Finally got it working
 01/09/15 v2.06 - Tx and Rx LED pins were reversed
-02/02/14 v2.06 - Added new channel for Rx status. 0 if not receiving data from outside, 1 if ok
+02/02/15 v2.06 - Added new Xively channel for Rx status. 0 if not receiving data from outside, 1 if ok
+02/28/15 v2.07 - changed some comments
+03/03/15 v2.08 - Added RSSI 
 
 */
 
-#define VERSION "v2.06"
-#define PRINT_DEBUG
+#define VERSION "v2.07"
+// #define PRINT_DEBUG  // comment this out to turn off serial printing
 
-#include <SPI.h>             //  Put this after cc1101.h Communicate with SPI devices http://arduino.cc/en/Reference/SPI
-#include "HardwareSerial.h"  // Required by IDE 1.5.x
+#include <Arduino.h>
+#include <SPI.h>             // http://arduino.cc/en/Reference/SPI
+#include "HardwareSerial.h"  // Required by IDE 1.6.x
 #include <ERxPachube.h>      // Library to upload to Xively  http://code.google.com/p/pachubelibrary/
 #include <Ethernet.h>        // LIbrary for Arduino ethernet shield http://arduino.cc/en/Reference/Ethernet
 #include <avr/wdt.h>         // Watchdog timer, Example code: http://code.google.com/p/arduwind/source/browse/trunk/ArduWind.ino
@@ -92,13 +88,16 @@ const byte ETH_SS_PIN =      9;  // Ethernet slave Select pin
 const byte TX_OK_LED_PIN =   5;  // LED to flash when Xively upload succeeds
 const byte RX_OK_LED_PIN =   4;  // LED to flash when panStamp packet is received
 
-const byte g_RF_Channel =         0;   // panStamp channel
-byte g_psNetworkAddress[] = {10, 0};   // panStamp network address, aka SyncWord
-const byte g_psReceiverAddress = 40;   // panStamp inside Rx address
-enum rx_status_t {RX_BAD, RX_GOOD}; // Status of packets received.
-
-// flag indicates a wireless panStamp packet has been received
-volatile boolean g_psPacketAvail = false;        
+const byte g_RF_Channel =               0;  // panStamp channel
+      byte g_psNetworkAddress[] = {10, 0};  // panStamp network address, aka SyncWord
+const byte g_psReceiverAddress =       40;   // panStamp inside Rx address
+      enum rx_status_t {RX_BAD, RX_GOOD};   // Status of packets received.
+  uint32_t g_gotpsPacketTime =          0;   // Keeps track of time since last successful panStamp packet from rain collector
+   uint8_t g_panStampSuccesses =        0;   // panStamp RxTx successes  
+    int8_t g_rssi =                     0;   // panStamp signal strength
+   
+volatile boolean g_psPacketAvail = false;   // flag indicates a wireless panStamp packet has been received
+ 
 
 // Variables to hold data coming from rain collector
 int  g_tempIn;          // Temp inside rain collector
@@ -109,14 +108,12 @@ int  g_rainPulseCount;  // Rain gauges pulses, 1 pulse = 0.01" rain
 bool g_isHeaterOn;      // True if heater on
 bool g_TxOK;            // True if rain collector is transmitting
 
-uint32_t g_gotpsPacketTime;    // Keeps track of time since last successful panStamp packet from rain collector
 
 uint8_t g_xively_successes =  0;  // Successful Xively uploads
 uint8_t g_xively_failures =   0;  // Xively Network failures
-uint8_t g_panStampSuccesses = 0;  // panStamp RxTx successes  
 
 
-// Declare function prototypes
+// Function Prototypes
 void radioSignalInterrupt(void);
 int  uploadRainCollector();
 void checkXivelyStatus(int statusXively);
@@ -125,7 +122,8 @@ void PrintDataStream(const ERxPachube& pachube);
 void printpanStampDeviceInfo();
 void software_Reset();
 
-// Handle interrupt from CC1101 (INT 0)
+
+// Routine to process interrupt from CC1101 (INT 0)
 void radioSignalInterrupt(CCPACKET *psPacket)
 {
   if( psPacket->crc_ok && psPacket->length > 1 )
@@ -146,6 +144,7 @@ void radioSignalInterrupt(CCPACKET *psPacket)
     g_tempHeatPad1 |=   psPacket->data[10];         
     g_tempHeatPad2 =    psPacket->data[11] << 8;
     g_tempHeatPad2 |=   psPacket->data[12];
+    g_rssi =            psPacket->rssi;
   } 
 
 }  // end radioSignalInterrupt()
@@ -159,7 +158,7 @@ void setup()
   pinMode(TX_OK_LED_PIN, OUTPUT);
   
   delay(500);
-  Serial.print(F("Rain Collector "));
+  Serial.print(F("Rain Collector\nVerion "));
   Serial.println(VERSION);
 
   Ethernet.select(ETH_SS_PIN);  // Set slave select pin - requires modified Ethernet.h library
@@ -276,7 +275,6 @@ int uploadRainCollector(bool gotRainData)
   dataout_Rain.updateData(10, g_panStampSuccesses);                 // panStamp Rx successes
   dataout_Rain.updateData(11, Rx_Status);                           // panStamp Rx status: 0 = not getting data, 1 = OK
   
-
   int xively_upload_status = dataout_Rain.updatePachube();  // send data to Xively
   
   #ifdef PRINT_DEBUG
@@ -334,6 +332,7 @@ void checkXivelyStatus(int statusXively)
       
 } // end checkXivelyStatus
 
+
 // Print data uploaded to Xively
 void PrintDataStream(const ERxPachube& pachube)
 {
@@ -376,7 +375,9 @@ void printpanStampDeviceInfo()
   Serial.println(panstamp.radio.syncWord[0]);
   Serial.print(F("Device address = "));
   Serial.println(panstamp.radio.devAddress);
-  
+  Serial.print(F("RSSI = "));
+  Serial.println(g_rssi);
+
 }  // end printpanStampDeviceInfo()
 
 
